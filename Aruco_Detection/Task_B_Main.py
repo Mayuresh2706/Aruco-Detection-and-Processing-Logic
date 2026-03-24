@@ -39,7 +39,9 @@ class Task_B_Controller(Node):
         self.last_marker_x = None
         self.last_marker_time = None
         self.zero_crossings = []
+        self.period_samples = []
         self.period = None
+        self.shots_fired = 0
 
     def drive_callback(self):
         if self.state == 'rotating':
@@ -85,6 +87,10 @@ class Task_B_Controller(Node):
                 cmd = Twist()
                 cmd.linear.x = self.lin_speed
                 self.cmd_pub.publish(cmd)
+
+        elif self.state == 'tracking':
+            stop_cmd = Twist()
+            self.cmd_pub.publish(stop_cmd)
 
 
     def odom_callback(self, msg):
@@ -144,8 +150,33 @@ class Task_B_Controller(Node):
         now = self.get_clock().now().nanoseconds / 1e9
 
         if self.last_marker_x is not None:
-            if self.last_marker_x * marker_x < 0:
-                self.zero_crossings.append(now)
+
+            #Detect a zero crossing
+            if (self.last_marker_x * marker_x < 0): 
+                if not self.zero_crossings or (now - self.zero_crossings[-1] > 0.1):
+                    self.zero_crossings.append(now)
+                
+
+            if len(self.zero_crossings) >= 3:
+                self.period = self.zero_crossings[-1] - self.zero_crossings[-3]
+                current_cycle_period = self.zero_crossings[-1] - self.zero_crossings[-3]
+                self.period_samples.append(current_cycle_period)
+            
+            if len(self.period_samples) == 3:
+                self.period = sum(self.period_samples) / len(self.period_samples)
+            
+            if (self.last_marker_x * marker_x < 0):
+                if self.period is not None and self.period > 0 and self.shots_fired < 3:
+                    self.get_logger().info(f"!!! SHOOTING !!! (Target at Zero, Shot {self.shots_fired + 1})")
+                    self.shots_fired += 1
+            
+                elif (self.shots_fired == 3):
+                    self.stop_robot()
+                
+
+        self.last_marker_x = marker_x
+        self.last_marker_time = now
+
 
     
     def _angle_diff(self,current,start):
