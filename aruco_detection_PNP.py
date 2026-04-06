@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import PoseStamped
 import cv2
 import numpy as np
 
@@ -10,7 +10,7 @@ class ArucoSub_Pub(Node):
         super().__init__('ArucoSub_Pub')
         self.subscription = self.create_subscription(
             Float32MultiArray, 'target_pixels', self.listener_callback, 10)
-        self.publisher_ = self.create_publisher(Pose, 'target_3d', 10)
+        self.publisher_ = self.create_publisher(PoseStamped, 'target_3d', 10)
         
         # Calibration data(need to change)(Assume 320x240 dimensions)
         self.mtx = np.array([
@@ -47,16 +47,18 @@ class ArucoSub_Pub(Node):
             print(f"Marker id = {marker_id}")
     
     def publish_pose(self, tvec, rvec,id):
-        pose_msg = Pose()
+        pose_msg = PoseStamped()
 
-        pose_msg.position.x = float(tvec[0][0])
-        pose_msg.position.y = float(tvec[1][0])
-        pose_msg.position.z = float(tvec[2][0])
+        pose_msg.header.frame_id = "camera_link"
+        pose_msg.header.stamp = self.get_clock().now().to_msg()
+        pose_msg.pose.position.x = float(tvec[0][0])
+        pose_msg.pose.position.y = float(tvec[1][0])
+        pose_msg.pose.position.z = float(tvec[2][0])
 
-        pose_msg.orientation.x = float(rvec[0][0])
-        pose_msg.orientation.y = float(rvec[1][0])
-        pose_msg.orientation.z = float(rvec[2][0])
-        pose_msg.orientation.w = float(id)
+        pose_msg.pose.orientation.x = float(rvec[0][0])
+        pose_msg.pose.orientation.y = float(rvec[1][0])
+        pose_msg.pose.orientation.z = float(rvec[2][0])
+        pose_msg.pose.orientation.w = float(id)
 
         self.publisher_.publish(pose_msg)
 
