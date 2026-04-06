@@ -3,17 +3,19 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist, Pose
 from nav_msgs.msg import Odometry
 import math
+from std_msgs.msg import Bool,String
 
 class Task_A_Controller(Node):
     def __init__(self):
         super().__init__('Task_A_Controller')
+        self.status_pub = self.create_publisher(String, 'task_status', 10)
+        self.active_sub = self.create_subscription(Bool, '/task_a_active', self.active_cb, 10)
         self.create_subscription(Pose, 'target_3d', self.task_a, 10)
         self.create_subscription(Odometry, 'odom', self.odom_callback, 10)
         self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
 
         self.drive_timer = self.create_timer(0.05, self.drive_callback)
 
-        # Odom constants
         self.current_x = 0.0
         self.current_y = 0.0
         self.start_x = 0.0
@@ -36,6 +38,11 @@ class Task_A_Controller(Node):
         self.rotation_phase = 0
         self.turn_90_direction = 1
 
+        self.is_active = False
+
+    def active_cb(self, msg):
+        self.is_active = msg.data
+    
     def drive_callback(self):
         if self.state == 'rotating':
             yaw_traveled = self._angle_diff(self.current_yaw, self.start_yaw)
@@ -94,6 +101,7 @@ class Task_A_Controller(Node):
 
     def task_a(self, msg):
         marker_id = int(msg.orientation.w)
+        if not self.is_active: return
         rvec_yaw = msg.orientation.y
         marker_x = msg.position.x
         marker_z = msg.position.z
@@ -142,6 +150,9 @@ class Task_A_Controller(Node):
         self.state = 'idle'
         self.cmd_pub.publish(Twist())
         self.get_logger().info("SUCCESS: 7cm Target Reached via Odom")
+        status_msg = String()
+        status_msg.data = "SUCCESS"
+        self.status_pub.publish(status_msg)
 
 
 def main(args=None):
