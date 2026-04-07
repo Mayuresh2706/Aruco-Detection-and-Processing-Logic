@@ -3,7 +3,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import Odometry
 import math
-from std_msgs.msg import Bool,String
+from std_msgs.msg import Bool, String
 
 class Task_A_Controller(Node):
     def __init__(self):
@@ -27,135 +27,159 @@ class Task_A_Controller(Node):
         self.angle_to_turn = 0.0
         self.state = 'idle'
 
-        self.target_x = 0.10       # X offset of target from marker (for yaw)
-        self.target_z = 0.07       # This is linear x in world system
-        self.z_threshold = 0.02   # 2cm lateral tolerance
-        self.x_threshold = 0.02   # ~5 degree tolerance
-        self.lin_speed = 0.04      # 4cm/s
-        self.ang_speed = 0.2      # rad/s
+        # Tuneables
+        self.stop_dist   = 0.07   # 7cm from aruco marker
+        self.side_offset = 0.15   # 15cm sideways to actual target (to the right)
+        self.x_threshold = 0.02   # lateral alignment tolerance (2cm)
+        self.lin_speed   = 0.04   # 4cm/s
+        self.ang_speed   = 0.2    # rad/s
 
-        # 0 = aligning to target, 1 = turning 90, 2 = straightening -90
+        # State machine phases for rotation
+        # 0 = aligning face-on to aruco
+        # 1 = turning RIGHT 90° toward target
+        # 2 = turning LEFT 90° to face target after offset drive
         self.rotation_phase = 0
-        self.turn_90_direction = 1
 
         self.is_active = False
 
     def active_cb(self, msg):
         self.is_active = msg.data
-    
-    def drive_callback(self):
-        if not self.is_active: 
+        if not self.is_active:
             self.state = 'idle'
+            self.rotation_phase = 0
+
+    def drive_callback(self):
+        if not self.is_active:
+            self.state = 'idle'
+            return
+
         if self.state == 'rotating':
             yaw_traveled = self._angle_diff(self.current_yaw, self.start_yaw)
 
             if abs(yaw_traveled) >= abs(self.angle_to_turn):
-                if (self.rotation_phase == 0):
-                    self.get_logger().info("Aligned! Turning 90")
-                    self.rotation_phase = 1
-                    self.angle_to_turn = self.turn_90_direction * math.pi / 2
-                    self.start_yaw = self.current_yaw
-
-                elif (self.rotation_phase == 1):
-                    self.get_logger().info("Aligned! Turning 90")
+                if self.rotation_phase == 0:
+                    # Finished aligning face-on → now drive straight to 7cm from marker
+                    self.get_logger().info("Aligned to marker! Driving in...")
                     self.rotation_phase = 0
-                    self.state = 'driving'
+                    self.state = 'driving_to_marker'
                     self.start_x = self.current_x
                     self.start_y = self.current_y
-                
-                elif self.rotation_phase == 2:
-                    self.get_logger().info("Ready to Fire")
+
+                elif self.rotation_phase == 1:
+                    # Finished turning RIGHT 90° → drive sideways offset
+                    self.get_logger().info("Turned right! Driving offset...")
                     self.rotation_phase = 0
-                    self.stop_robot()
-                
+                    self.state = 'driving_offset'
+                    self.start_x = self.current_x
+                    self.start_y = self.current_y
+
+                elif self.rotation_phase == 2:
+                    # Finished turning LEFT 90° → facing target, FIRE
+                    self.get_logger().info("Facing target!")
+                    self.rotation_phase = 0
+                    self.fire()
             else:
                 cmd = Twist()
                 cmd.angular.z = -self.ang_speed if self.angle_to_turn > 0 else self.ang_speed
                 self.cmd_pub.publish(cmd)
 
-        elif self.state == 'driving':
+        elif self.state == 'driving_to_marker':
             dist_traveled = math.sqrt(
                 (self.current_x - self.start_x)**2 +
                 (self.current_y - self.start_y)**2
             )
             if dist_traveled >= self.distance_to_travel:
-                self.rotation_phase = 2
-                self.angle_to_turn = -self.turn_90_direction * math.pi / 2
+                self.get_logger().info(f"Reached marker! Turning right 90°")
+                self.rotation_phase = 1
+                self.angle_to_turn = math.pi / 2   # positive = turn right
                 self.state = 'rotating'
-                self.get_logger().info("Aligning")
                 self.start_yaw = self.current_yaw
-            
             else:
                 cmd = Twist()
                 cmd.linear.x = self.lin_speed
                 self.cmd_pub.publish(cmd)
 
+        elif self.state == 'driving_offset':
+            dist_traveled = math.sqrt(
+                (self.current_x - self.start_x)**2 +
+                (self.current_y - self.start_y)**2
+            )
+            if dist_traveled >= self.side_offset:
+                self.get_logger().info("Offset reached! Turning left 90°")
+                self.rotation_phase = 2
+                self.angle_to_turn = -math.pi / 2  # negative = turn left
+                self.state = 'rotating'
+                self.start_yaw = self.current_yaw
+            else:
+                cmd = Twist()
+                cmd.linear.x = self.lin_speed
+                self.cmd_pub.publish(cmd)
 
     def odom_callback(self, msg):
         self.current_x = msg.pose.pose.position.x
         self.current_y = msg.pose.pose.position.y
-        
-        #Quart to Yaw(just a formula)
         q = msg.pose.pose.orientation
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
 
     def task_a(self, msg):
-        marker_id = int(msg.orientation.w)
         if not self.is_active: return
-        rvec_yaw = msg.orientation.y
-        marker_x = msg.position.x
-        marker_z = msg.position.z
-        err_x = marker_x - self.target_x
-        
-        if marker_id != 1:
-            return
-        
-        if self.state != 'idle':
-            return
-        
-        #Ensure that we are not too far away
-        if marker_z > 0.5: 
+        if self.state != 'idle': return
+
+        marker_id = int(msg.pose.orientation.w)
+        if marker_id != 1: return
+
+        marker_x = msg.pose.position.x  
+        marker_z = msg.pose.position.z   
+
+        # Too far away — wait for nav2 to get closer
+        if marker_z > 0.5:
+            self.get_logger().info(f"Marker too far ({marker_z:.2f}m), waiting...")
             return
 
+        # Too far to the side
         if abs(marker_x) > 0.3:
+            self.get_logger().info(f"Marker too far sideways ({marker_x:.2f}m), waiting...")
             return
-        
-       
+
+        err_x = marker_x  # we want marker centered (err = 0)
 
         if abs(err_x) > self.x_threshold:
+            # Need to rotate to center the marker
             self.angle_to_turn = math.atan2(err_x, marker_z)
-            self.distance_to_travel = max(0.0,marker_z - self.target_z)
+            self.distance_to_travel = max(0.0, marker_z - self.stop_dist)
             self.start_yaw = self.current_yaw
+            self.rotation_phase = 0
             self.state = 'rotating'
-            self.get_logger().info(f"Starting rotation: {math.degrees(self.angle_to_turn):.1f} deg")
-        
+            self.get_logger().info(f"Aligning: rotating {math.degrees(self.angle_to_turn):.1f}°, then driving {self.distance_to_travel:.3f}m")
         else:
-            self.distance_to_travel = marker_z - self.target_z
+            # Already aligned, just drive in
+            self.distance_to_travel = max(0.0, marker_z - self.stop_dist)
             self.start_x = self.current_x
             self.start_y = self.current_y
-            self.state = 'driving'
+            self.state = 'driving_to_marker'
             self.get_logger().info(f"Already aligned. Driving {self.distance_to_travel:.3f}m")
 
-    def _angle_diff(self,current,start):
-        # Handles wrapping of angles
-        diff = current - start
-        while diff > math.pi:  
-            diff -= 2 * math.pi
-        while diff < -math.pi: 
-            diff += 2 * math.pi
-        return diff
-
-
-    def stop_robot(self):
-        self.state = 'idle'
-        self.cmd_pub.publish(Twist())
-        self.get_logger().info("SUCCESS: 7cm Target Reached via Odom")
+    def fire(self):
+        self.stop_robot()
+        self.get_logger().info("🔥 FIRE 🔥")
         status_msg = String()
         status_msg.data = "SUCCESS"
         self.status_pub.publish(status_msg)
 
+    def stop_robot(self):
+        self.state = 'idle'
+        self.rotation_phase = 0
+        self.cmd_pub.publish(Twist())
+
+    def _angle_diff(self, current, start):
+        diff = current - start
+        while diff > math.pi:
+            diff -= 2 * math.pi
+        while diff < -math.pi:
+            diff += 2 * math.pi
+        return diff
 
 def main(args=None):
     rclpy.init(args=args)
