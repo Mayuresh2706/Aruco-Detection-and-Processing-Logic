@@ -1,148 +1,7 @@
-# import rclpy
-# from rclpy.node import Node
-# from std_msgs.msg import Bool, String
-# from geometry_msgs.msg import PoseStamped
-# from nav2_msgs.action import NavigateToPose
-# from rclpy.action import ActionClient
-# import math 
-# from tf2_ros import Buffer, TransformListener
-# from tf2_geometry_msgs import do_transform_pose
-
-# class MissionManager(Node):
-#     def __init__(self):
-#         super().__init__('mission_manager')
-#         self.target_id = 1
-#         self.state = "SEARCHING" 
-        
-#         self.detection_count = 0
-#         self.history_x = []
-#         self.history_z = []
-#         self.filter_size = 10 
-
-#         self.tf_buffer = Buffer()
-#         self.tf_listener = TransformListener(self.tf_buffer, self)
-        
-#         self.exp_active_pub = self.create_publisher(Bool, '/explorer_active', 10)
-#         self.task_active_pub = self.create_publisher(Bool, '/task_a_active', 10)
-        
-#         self.create_subscription(PoseStamped, 'target_3d', self.aruco_callback, 10)
-        
-#         self.create_subscription(String, 'task_status', self.task_status_cb, 10)
-        
-#         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
-#         self.get_logger().info("Mission Manager Initialized - SEARCHING")
-
-#     def aruco_callback(self, msg):
-#         marker_id = int(msg.orientation.w)
-        
-#         if self.state == "SEARCHING" and marker_id == self.target_id:
-      
-#             try:
-#                 t = self.tf_buffer.lookup_transform(
-#                     'map', 
-#                     msg.header.frame_id, 
-#                     msg.header.stamp,    
-#                     timeout=rclpy.duration.Duration(seconds=0.1)
-#                 )
-
-#                 p_map = do_transform_pose(msg.pose, t)
-
-#                 self.history_x.append(p_map.position.x)
-#                 self.history_y.append(p_map.position.y)
-
-#                 if len(self.history_x) >= self.filter_size:
-#                     avg_x = sum(self.history_x) / len(self.history_x)
-#                     avg_y = sum(self.history_y) / len(self.history_y)
-                    
-#                     self.get_logger().info(f"TARGET {self.target_id} LOCKED. Precision Match.")
-#                     self.start_approach(avg_x, avg_y)
-
-#             except Exception as e:
-#                 self.get_logger().warn(f"TF sync failed: {e}")
-
-#     def start_approach(self, target_x, target_y):
-#         self.state = "APPROACHING"
-#         self.exp_active_pub.publish(Bool(data=False))
-        
-#         # Get current robot position in map to calculate approach vector
-#         try:
-#             now = rclpy.time.Time()
-#             t = self.tf_buffer.lookup_transform('map', 'base_link', now, 
-#                                                 timeout=rclpy.duration.Duration(seconds=0.5))
-#             robot_x = t.transform.translation.x
-#             robot_y = t.transform.translation.y
-            
-#             # Vector from target to robot (the approach direction)
-#             dx = robot_x - target_x
-#             dy = robot_y - target_y
-#             dist = math.sqrt(dx**2 + dy**2)
-
-#             # Safety: Don't divide by zero if you're already there
-#             if dist < 0.1:
-#                 self.get_logger().warn("Too close to ArUco to calculate approach.")
-#                 return
-
-#             # Calculate point 40cm away from target toward the robot
-#             goal_x = target_x + (0.4 * dx / dist)
-#             goal_y = target_y + (0.4 * dy / dist)
-            
-#             # Angle to face the ArUco
-#             angle = math.atan2(target_y - goal_y, target_x - goal_x)
-
-#             # Send Goal... (rest of your Nav2 logic)
-            
-#         except Exception as e:
-#             self.get_logger().error(f"Final approach calculation failed: {e}")
-
-#     def nav_response_cb(self, future):
-#             goal_handle = future.result()
-#             if not goal_handle.accepted:
-#                 self.get_logger().error("Approach Goal Rejected! Resuming Search.")
-#                 self.reset_to_explore()
-#                 return
-            
-#             result_future = goal_handle.get_result_async()
-#             result_future.add_done_callback(self.nav_finished_cb)
-
-#     def nav_finished_cb(self, future):
-#         self.get_logger().info("Approach Complete. Handing control to Task A Controller.")
-#         self.state = "DOCKING"
-        
-#         self.task_active_pub.publish(Bool(data=True))
-
-#     def task_status_cb(self, msg):
-#         if msg.data == "SUCCESS" and self.state == "DOCKING":
-#             self.get_logger().info("Task A confirmed Success. Resuming Exploration.")
-#             self.reset_to_explore()
-
-#     def reset_to_explore(self):
-#         self.task_active_pub.publish(Bool(data=False))
-#         self.exp_active_pub.publish(Bool(data=True))
-        
-#         self.state = "SEARCHING"
-#         self.detection_count = 0
-#         self.history_x.clear()
-#         self.history_z.clear()
-
-# def main():
-#     rclpy.init()
-#     node = MissionManager()
-#     rclpy.spin(node)
-#     rclpy.shutdown()
-
-
-
-
-
-
-
-
-
-
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
-from geometry_msgs.msg import PoseStamped # UPDATED
+from geometry_msgs.msg import PoseStamped 
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 import math 
@@ -173,7 +32,6 @@ class MissionManager(Node):
         self.get_logger().info("Mission Manager Initialized - SEARCHING")
 
     def aruco_callback(self, msg):
-        # marker_id stored in orientation.w hack
         marker_id = int(msg.pose.orientation.w)
         
         if self.state == "SEARCHING" and marker_id == self.target_id:
@@ -182,7 +40,7 @@ class MissionManager(Node):
                 t = self.tf_buffer.lookup_transform(
                     'map', 
                     msg.header.frame_id, 
-                    msg.header.stamp,    
+                    rclpy.time.Time(),    
                     timeout=rclpy.duration.Duration(seconds=0.1)
                 )
 

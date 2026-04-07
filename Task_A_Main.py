@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist, Pose
+from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import Odometry
 import math
 from std_msgs.msg import Bool,String
@@ -10,7 +10,7 @@ class Task_A_Controller(Node):
         super().__init__('Task_A_Controller')
         self.status_pub = self.create_publisher(String, 'task_status', 10)
         self.active_sub = self.create_subscription(Bool, '/task_a_active', self.active_cb, 10)
-        self.create_subscription(Pose, 'target_3d', self.task_a, 10)
+        self.create_subscription(PoseStamped, 'target_3d', self.task_a, 10)
         self.create_subscription(Odometry, 'odom', self.odom_callback, 10)
         self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
 
@@ -44,6 +44,8 @@ class Task_A_Controller(Node):
         self.is_active = msg.data
     
     def drive_callback(self):
+        if not self.is_active: 
+            self.state = 'idle'
         if self.state == 'rotating':
             yaw_traveled = self._angle_diff(self.current_yaw, self.start_yaw)
 
