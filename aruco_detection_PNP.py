@@ -51,10 +51,16 @@ class ArucoSub_Pub(Node):
 
         pose_msg.header.frame_id = "camera_link"
         pose_msg.header.stamp = self.get_clock().now().to_msg()
+<<<<<<< HEAD
         pose_msg.pose.position.x = float(tvec[2][0])  
         pose_msg.pose.position.y = -float(tvec[0][0])  
         pose_msg.pose.position.z = -float(tvec[1][0])  
 
+=======
+        pose_msg.pose.position.x = float(tvec[0][0])
+        pose_msg.pose.position.y = float(tvec[1][0])
+        pose_msg.pose.position.z = float(tvec[2][0])
+>>>>>>> 498805b792fca7ca60c6d3e6a1cd38b616040c7a
 
         pose_msg.pose.orientation.x = float(rvec[0][0])
         pose_msg.pose.orientation.y = float(rvec[1][0])

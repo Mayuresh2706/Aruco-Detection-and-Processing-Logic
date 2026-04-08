@@ -1,13 +1,21 @@
 import rclpy
 from rclpy.node import Node
+<<<<<<< HEAD
 from geometry_msgs.msg import Twist, PoseStamped
+=======
+from geometry_msgs.msg import Twist, Pose
+>>>>>>> 498805b792fca7ca60c6d3e6a1cd38b616040c7a
 from nav_msgs.msg import Odometry
 import math
 
 class Task_B_Controller(Node):
     def __init__(self):
         super().__init__('Task_B_Controller')
+<<<<<<< HEAD
         self.create_subscription(PoseStamped, 'target_3d', self.marker_callback, 10)
+=======
+        self.create_subscription(Pose, 'target_3d', self.marker_callback, 10)
+>>>>>>> 498805b792fca7ca60c6d3e6a1cd38b616040c7a
         self.create_subscription(Odometry, 'odom', self.odom_callback, 10)
         self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
 
